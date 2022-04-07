@@ -73,11 +73,6 @@ new power = old power + or - random times given percent of old power
 
 
 
-# Physical model API helpers
-def Span(length, amp=None):
-    "Return a fiber segment of length km with a compensating amp"
-    return Segment(span=Fiber(length=length), amplifier=amp)
-
 # Network topology
 def createnetwork(power_a, length_bga, length_aw, length_wb):
     """We model a simple network for covert communication.
@@ -112,6 +107,13 @@ def createnetwork(power_a, length_bga, length_aw, length_wb):
 
     net = Network()
 
+    def Span(length, amp='', **params):
+        "Return length segment with optional compensating amp"
+        assert isinstance(amp, str), f'Span(): {amp} is not a string'
+        if amp:
+            amp = net.add_amplifier(amp, **params)
+        return Segment(span=Fiber(length=length), amplifier=amp)
+    
     # Background traffic generator
     transceivers = [Transceiver(i,f'tx{i}',0*dBm)
                     for i in range(1, TXCOUNT+1)]
@@ -130,8 +132,7 @@ def createnetwork(power_a, length_bga, length_aw, length_wb):
     # Background traffic goes from r0 -> boost0 -> 25km -> r1
     boost0 = net.add_amplifier('boost0', target_gain=17*dB, boost=True,
                                monitor_mode='out')
-    amp0 = net.add_amplifier('amp0', target_gain=25*.2)
-    spans0 = [Span( length=length_bga, amp=amp0)]
+    spans0 = [Span(length=length_bga, amp='amp0', target_gain=25*.2)]
     net.add_link(
         r0, r1, src_out_port=LINEOUT, dst_in_port=LINEIN,
         boost_amp=boost0, spans=spans0)
@@ -141,29 +142,30 @@ def createnetwork(power_a, length_bga, length_aw, length_wb):
 
     #           hmmmm    *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *    !
     """
-    # Generic amp for any number of amps on the Alice to Bob link:
-    amp_ab = net.add_amplifier('amp_ab', target_gain=ab_span_amp_gain, monitor_mode='in')
+    # The single boost amp going in to A to W span
+    boost_aw = net.add_amplifier('boost_aw', target_gain=3*dB, boost=True, monitor_mode='out')
+    spans_aw = []
 
-    # Spec'd number of spans on the Alice to Bob link, each ending in an amp with spec'd gain
-    for s in range(1, ab_spans + 1):
-        spans_ab.append(Span(length=length_aw_spans, amp=amp_ab))  # Add additional spans+amps as spec'd
-    
-    
-    # The single boost amp going in to A to B span
-    boost_ab = net.add_amplifier('boost_ab', target_gain=3*dB, boost=True, monitor_mode='out')
-    
-    spans_ab = [Span(length=length_aw_spans, amp=amp_ab)]
-    
+    # Spec'd number of spans on the Alice to Willie link, each ending in an amp with spec'd gain
+    for s in range(1, aw_spans + 1):
+        # Add additional spans+amps as spec'd
+        params = dict(target_gain=ab_span_amp_gain, monitor_mode='in')
+        spans_aw.append(Span(length=length_aw_spans, amp=f'amp_ab{s}', **params)
+
+    # Willie's tap and any spans between Willie and Bob
+    spans_wb = [Span(length=length_aw, 'tap', target_gain=0, monitor_mode='in'),
+                # additional spans if desired
+                ]
+
     net.add_link(r1, r2, src_out_port=LINEOUT, dst_in_port=LINEIN,
-        boost_amp=boost_ab, spans=spans_ab )
-    
+        boost_amp=boost_aw, spans=spans_aw+spans_wb)
     """
 
     # Original:
 
-    tap = net.add_amplifier('tap', target_gain=0, monitor_mode='in')
     boost1 = net.add_amplifier('boost1', target_gain=3*dB, boost=True, monitor_mode='out')
-    spans1 = [Span(length=length_aw, amp=tap), Span(length=length_wb)]
+    spans1 = [Span(length=length_aw, amp='tap', target_gain=0, monitor_mode='in'),
+              Span(length=length_wb)]
 
     net.add_link(
         r1, r2, src_out_port=LINEOUT, dst_in_port=LINEIN,
